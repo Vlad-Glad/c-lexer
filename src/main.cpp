@@ -1,14 +1,31 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include <string>
 
-
+#include "lexer/Lexer.hpp"
 #include "lexer/Token.hpp"
+
+using namespace clex;
 
 static void printUsage(const char* argv0) {
 	std::cerr << "Usage: " << argv0 << " <path/to/file.c>\n";
  }
+
+static void printToken(const Token& t, bool color) {
+    if (color) {
+        if (t.kind == TokenKind::Keyword) std::cout << "\x1b[34m";
+        else if (t.kind == TokenKind::IntLiteral || t.kind == TokenKind::FloatLiteral) std::cout << "\x1b[36m";
+        else if (t.kind == TokenKind::StringLiteral || t.kind == TokenKind::CharLiteral) std::cout << "\x1b[32m";
+        else if (t.kind == TokenKind::Comment) std::cout << "\x1b[90m";
+        else if (t.kind == TokenKind::Error) std::cout << "\x1b[31m";
+    }
+    std::cout << "<" << t.lexeme << ", " << to_string(t.kind)
+        << ", " << t.pos.line << ":" << t.pos.column << ">";
+    if (!t.message.empty()) std::cout << " // " << t.message;
+    if (color) std::cout << "\x1b[0m";
+    std::cout << "\n";
+}
+
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -16,43 +33,31 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    const std::string path = argv[1];
+    bool keepComments = true;
+    bool color = true;
 
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
-        std::cerr << "Error: cannot open file: " << path << "\n";
-        return 1;
+    for (int i = 2; i < argc; ++i) {
+        std::string opt = argv[i];
+        if (opt == "--no-comments") keepComments = false;
+        else if (opt == "--no-color") color = false;
     }
 
-    std::ostringstream buf;
+    std::ifstream in(argv[1]);
+
+    if (!in) { 
+        std::cerr << "Cannot open: " << argv[1] << "\n"; return 1; 
+    }
+
+    std::stringstream buf;
     buf << in.rdbuf();
-    std::string source = buf.str();
 
-    std::size_t bytes = source.size();
+    Lexer lex(buf.str(), LexerOptions{ keepComments, /*mergePreproc*/ true });
+    auto tokens = lex.tokenize();
 
-    std::size_t lines = 0;
-    for (char c : source) if (c == '\n') ++lines;
-    if (!source.empty() && source.back() != '\n') ++lines;
-
-    std::cout << "Loaded file: " << path << "\n";
-    std::cout << "Bytes: " << bytes << "\n";
-    std::cout << "Lines: " << lines << "\n";
-
-
-    std::cout << "---- preview (up to 10 lines) ----\n";
-    {
-        std::istringstream inmem(source);
-        std::string line;
-        int shown = 0;
-        while (shown < 10 && std::getline(inmem, line)) {
-            std::cout << (shown + 1) << ": " << line << "\n";
-            ++shown;
-        }
-        if (shown == 0) std::cout << "(file is empty)\n";
-        if (shown == 10) std::cout << "... (truncated)\n";
+    bool hasError = false;
+    for (const auto& t : tokens) {
+        printToken(t, color);          // <-- виправили 'color'
+        if (t.kind == TokenKind::Error) hasError = true;
     }
-    std::cout << "-----------------------------------\n";
-
-
-    return 0;
+    return hasError ? 2 : 0;
 }
