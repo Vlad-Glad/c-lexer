@@ -1,225 +1,140 @@
-#include "lexer/Lexer.hpp"
+﻿#include "lexer/Lexer.hpp"
+#include <regex>
 #include <unordered_set>
 #include <cctype>
-#include <cstring>
 
 namespace clex {
 
     static const std::unordered_set<std::string> kKeywords = {
-      "int","char","if","else","for","while","return","void","const","static","struct",
-      "union","enum","typedef","sizeof","switch","case","default","break","continue",
-      "do","goto","volatile","extern","signed","unsigned","short","long","float","double",
-      "auto","_Bool","_Alignas","_Atomic","_Generic","_Noreturn","_Static_assert","_Thread_local"
+      "int","char","float","double","void","if","else","for","while","return",
+      "const","static","struct","union","enum","typedef","sizeof",
+      "switch","case","default","break","continue","do","goto",
+      "volatile","extern","signed","unsigned","short","long","auto","_Bool"
     };
 
-    static Token make(TokenKind k, std::string_view slice, int L, int C, std::string msg = {}) {
-        return Token{ k, std::string(slice), {L,C}, std::move(msg) };
+    static const std::regex RX_WS(R"(^[ \t\r\n]+)");
+    static const std::regex RX_PREPROC(R"(^#[^\n]*(\\\n[^\n]*)*)");
+
+    static const std::regex RX_LINE_COM(R"(^//[^\n]*)");
+    static const std::regex RX_BLOCK_COM(R"(^/\*[\s\S]*?\*/)");
+
+    static const std::regex RX_STRING(R"(^"([^"\\]|\\.)*")");
+    static const std::regex RX_CHAR(R"(^'([^'\\]|\\.)')");
+
+    static const std::regex RX_INT_HEX(R"(^0[xX][0-9A-Fa-f]+[uUlL]*)");
+
+    static const std::regex RX_FLOAT(
+        R"(^(([0-9]+\.[0-9]*|\.[0-9]+|[0-9]+([eE][+\-]?[0-9]+)))[fFlL]?)"
+    );
+
+    static const std::regex RX_INT_DEC(R"(^[0-9]+[uUlL]*)");
+    static const std::regex RX_IDENT(R"(^[A-Za-z_][A-Za-z0-9_]*)");
+
+    static const std::regex RX_OP_ALL(
+        R"(^(\.{3}|>>=|<<=|==|!=|>=|<=|&&|\|\||\+\+|--|\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<|>>|->|##|[+\-*/%=!<>&|^~?:.,;(){}\[\]#]))"
+    );
+
+
+    // ---- спільний matcher ----
+    template<class Re>
+    static bool match_begin(std::string_view sv, const Re& re, std::string& out) {
+        std::match_results<std::string_view::const_iterator> m;
+        if (std::regex_search(sv.begin(), sv.end(), m, re,
+            std::regex_constants::match_continuous)) {
+            out.assign(m[0].first, m[0].second);
+            return true;
+        }
+        return false;
     }
 
-    Lexer::Lexer(std::string source, LexerOptions opts)
-        : s_(std::move(source)), opts_(opts) {
-    }
+    Lexer::Lexer(std::string source) : s_(std::move(source)) {}
 
     bool Lexer::eof() const { return i_ >= s_.size(); }
 
-    char Lexer::peek(int k) const {
-        return (i_ + k < s_.size()) ? s_[i_ + k] : '\0';
-    }
-
-    char Lexer::get() {
-        char c = peek();
-        if (!eof()) {
+    void Lexer::advance(std::string_view text) {
+        for (char c : text) {
             ++i_;
-            if (c == '\n') { ++line_; col_ = 1; lineStart_ = i_; }
-            else ++col_;
-        }
-        return c;
-    }
-
-    bool Lexer::match(std::string_view t) {
-        for (size_t k = 0; k < t.size(); ++k) if (peek((int)k) != t[k]) return false;
-        for (size_t k = 0; k < t.size(); ++k) get();
-        return true;
-    }
-
-    bool Lexer::atLineStart() const { return i_ == lineStart_; }
-
-    bool Lexer::isIdentStart(char c) const {
-        return std::isalpha((unsigned char)c) || c == '_';
-    }
-    bool Lexer::isIdentCont(char c) const {
-        return isIdentStart(c) || std::isdigit((unsigned char)c);
-    }
-
-    void Lexer::skipWhitespace() {
-        while (!eof()) {
-            char c = peek();
-            if (c == ' ' || c == '\t' || c == '\r' || c == '\n') get();
-            else break;
+            if (c == '\n') { ++line_; col_ = 1; }
+            else { ++col_; }
         }
     }
 
-    // ---- ������ �������� ----
-
-    Token Lexer::readLineComment() {
-        int L = line_, C = col_ - 2; size_t st = i_ - 2;
-        while (!eof() && peek() != '\n') get();
-        return make(TokenKind::Comment, std::string_view(s_).substr(st, i_ - st), L, C);
+    Token Lexer::make(TokenKind k, std::string_view m, int L, int C, std::string msg) {
+        return Token{ k, std::string(m), {L, C}, std::move(msg) };
     }
-
-    Token Lexer::readBlockComment() {
-        int L = line_, C = col_ - 2; size_t st = i_ - 2;
-        while (!eof()) {
-            if (match("*/"))
-                return make(TokenKind::Comment, std::string_view(s_).substr(st, i_ - st), L, C);
-            get();
-        }
-        return make(TokenKind::Error, std::string_view(s_).substr(st, i_ - st), L, C, "Unterminated block comment");
-    }
-
-    Token Lexer::readPreproc() {
-        int L = line_, C = col_; size_t st = i_;
-        while (!eof()) {
-            char c = get();
-            if (c == '\\' && peek() == '\n') { get(); continue; } // ����������� �����
-            if (c == '\n') break;
-        }
-        return make(TokenKind::Preprocessor, std::string_view(s_).substr(st, i_ - st), L, C);
-    }
-
-    Token Lexer::readString() {
-        int L = line_, C = col_; size_t st = i_;
-        get(); // consume opening "
-        while (!eof()) {
-            char c = get();
-            if (c == '"') break;
-            if (c == '\\' && !eof()) get();   // escape-������������
-            if (c == '\n') return make(TokenKind::Error, std::string_view(s_).substr(st, i_ - st), L, C, "Unterminated string");
-        }
-        return make(TokenKind::StringLiteral, std::string_view(s_).substr(st, i_ - st), L, C);
-    }
-
-    Token Lexer::readChar() {
-        int L = line_, C = col_; size_t st = i_;
-        get(); // consume opening '
-        bool got = false;
-        while (!eof()) {
-            char c = get();
-            if (c == '\'') { if (!got) return make(TokenKind::Error, std::string_view(s_).substr(st, i_ - st), L, C, "Empty char literal"); break; }
-            if (c == '\\' && !eof()) get();
-            got = true;
-            if (c == '\n') return make(TokenKind::Error, std::string_view(s_).substr(st, i_ - st), L, C, "Unterminated char literal");
-        }
-        return make(TokenKind::CharLiteral, std::string_view(s_).substr(st, i_ - st), L, C);
-    }
-
-    Token Lexer::readNumber() {
-        int L = line_, C = col_; size_t st = i_;
-        bool isFloat = false;
-
-        // �������������
-        if (peek() == '0' && (peek(1) == 'x' || peek(1) == 'X')) {
-            get(); get();
-            bool any = false;
-            while (std::isxdigit((unsigned char)peek())) { any = true; get(); }
-            if (!any) return make(TokenKind::Error, std::string_view(s_).substr(st, i_ - st), L, C, "Expected hex digits after 0x");
-            while (std::strchr("uUlL", peek())) get();
-            return make(TokenKind::IntLiteral, std::string_view(s_).substr(st, i_ - st), L, C);
-        }
-
-        // ��������/float
-        while (std::isdigit((unsigned char)peek())) get();
-        if (peek() == '.') { isFloat = true; get(); while (std::isdigit((unsigned char)peek())) get(); }
-        if (peek() == 'e' || peek() == 'E') {
-            isFloat = true; get();
-            if (peek() == '+' || peek() == '-') get();
-            bool any = false; while (std::isdigit((unsigned char)peek())) { any = true; get(); }
-            if (!any) return make(TokenKind::Error, std::string_view(s_).substr(st, i_ - st), L, C, "Malformed exponent");
-        }
-        if (isFloat) {
-            if (std::strchr("fFlL", peek())) get();
-            return make(TokenKind::FloatLiteral, std::string_view(s_).substr(st, i_ - st), L, C);
-        }
-        else {
-            while (std::strchr("uUlL", peek())) get();
-            return make(TokenKind::IntLiteral, std::string_view(s_).substr(st, i_ - st), L, C);
-        }
-    }
-
-    Token Lexer::readIdentOrKeyword() {
-        int L = line_, C = col_; size_t st = i_;
-        get();
-        while (isIdentCont(peek())) get();
-        std::string w = s_.substr(st, i_ - st);
-        if (kKeywords.count(w)) return Token{ TokenKind::Keyword, std::move(w), {L,C}, {} };
-        return Token{ TokenKind::Identifier, std::move(w), {L,C}, {} };
-    }
-
-    Token Lexer::readOperatorOrPunct() {
-        int L = line_, C = col_; size_t st = i_;
-        auto sv = std::string_view(s_).substr(i_);
-        auto take = [&](std::string_view t)->bool {
-            if (sv.rfind(t, 0) == 0) { i_ += t.size(); col_ += (int)t.size(); return true; }
-            return false;
-            };
-        // ������������
-        if (take("...")) return make(TokenKind::Ellipsis, std::string_view(s_).substr(st, i_ - st), L, C);
-        if (take(">>=") || take("<<=") || take("->") || take("##"))
-            return make(TokenKind::Operator, std::string_view(s_).substr(st, i_ - st), L, C);
-
-        // ������������
-        static const char* twoOps[] = {
-          "==","!=",">=","<=","&&","||","++","--",
-          "+=","-=","*=","/=","%=","&=","|=","^=",
-          "<<",">>"
-        };
-        for (auto* op : twoOps)
-            if (take(op)) return make(TokenKind::Operator, std::string_view(s_).substr(st, i_ - st), L, C);
-
-        // �������������
-        char c = peek();
-        const std::string one = "+-*/%=!<>&|^~?:.,;(){}[]#";
-        if (one.find(c) != std::string::npos) {
-            get();
-            if (c == '#') return make(TokenKind::MacroHash, std::string_view(s_).substr(st, i_ - st), L, C);
-            if (std::string("(),;{}[]").find(c) != std::string::npos)
-                return make(TokenKind::Punctuator, std::string_view(s_).substr(st, i_ - st), L, C);
-            return make(TokenKind::Operator, std::string_view(s_).substr(st, i_ - st), L, C);
-        }
-
-        // �������� ������
-        char bad = peek();
-        get();
-        return Token{ TokenKind::Error, std::string(1,bad), {L,C}, "Unknown token" };
-    }
-
-    // ---- ������� ������ ----
 
     Token Lexer::next() {
-        skipWhitespace();
-        if (eof()) return Token{ TokenKind::EndOfFile, "", {line_, col_}, {} };
+        while (!eof()) {
+            std::string_view sv = std::string_view(s_).substr(i_);
+            int L = line_, C = col_;
+            std::string m;
 
-        if (atLineStart() && peek() == '#' && opts_.mergePreproc) return readPreproc();
-        if (match("//")) return readLineComment();
-        if (match("/*")) return readBlockComment();
+            // 1) пропустити пробіли
+            if (match_begin(sv, RX_WS, m)) { advance(m); continue; }
 
-        char c = peek();
-        if (c == '"') return readString();
-        if (c == '\'') return readChar();
-        if (std::isdigit((unsigned char)c) || (c == '.' && std::isdigit((unsigned char)peek(1))))
-            return readNumber();
-        if (isIdentStart(c)) return readIdentOrKeyword();
-        return readOperatorOrPunct();
+            // 2) препроцесор (#... із переносами рядка) — одним токеном
+            if (match_begin(sv, RX_PREPROC, m)) { advance(m); return make(TokenKind::Preprocessor, m, L, C); }
+
+            // 3) коментарі (всегда повертаємо як токени)
+            if (match_begin(sv, RX_LINE_COM, m)) { advance(m); return make(TokenKind::Comment, m, L, C); }
+            if (match_begin(sv, RX_BLOCK_COM, m)) { advance(m); return make(TokenKind::Comment, m, L, C); }
+            // якщо починається на "/*", але не збіглося — незакритий блочний
+            if (sv.rfind("/*", 0) == 0) { advance(sv); return make(TokenKind::Error, sv, L, C, "Unterminated block comment"); }
+
+            // 4) рядки / символи
+            if (!sv.empty() && sv[0] == '"') {
+                if (match_begin(sv, RX_STRING, m)) { advance(m); return make(TokenKind::StringLiteral, m, L, C); }
+                std::size_t len = 1; while (len < sv.size() && sv[len] != '\n') ++len;
+                std::string_view bad = sv.substr(0, len); advance(bad);
+                return make(TokenKind::Error, bad, L, C, "Unterminated string");
+            }
+            if (!sv.empty() && sv[0] == '\'') {
+                if (match_begin(sv, RX_CHAR, m)) { advance(m); return make(TokenKind::CharLiteral, m, L, C); }
+                std::size_t len = 1; while (len < sv.size() && sv[len] != '\n') ++len;
+                std::string_view bad = sv.substr(0, len); advance(bad);
+                return make(TokenKind::Error, bad, L, C, "Unterminated char literal");
+            }
+
+            // 5) числа: hex → float → десяткові int
+            if (match_begin(sv, RX_INT_HEX, m)) { advance(m); return make(TokenKind::IntLiteral, m, L, C); }
+            if (match_begin(sv, RX_FLOAT, m)) { advance(m); return make(TokenKind::FloatLiteral, m, L, C); }
+            if (match_begin(sv, RX_INT_DEC, m)) { advance(m); return make(TokenKind::IntLiteral, m, L, C); }
+
+            // 6) ідентифікатори / ключові слова
+            if (match_begin(sv, RX_IDENT, m)) {
+                advance(m);
+                if (kKeywords.count(m)) return Token{ TokenKind::Keyword, m, {L,C}, {} };
+                return Token{ TokenKind::Identifier, m, {L,C}, {} };
+            }
+
+            // 7) оператори / пунктуація / спец
+            if (match_begin(sv, RX_OP_ALL, m)) {
+                if (m == "...") { advance(m); return make(TokenKind::Ellipsis, m, L, C); }
+                if (m == "##") { advance(m); return make(TokenKind::MacroConcat, m, L, C); }
+                if (m == "#") { advance(m); return make(TokenKind::MacroHash, m, L, C); }
+                if (m.size() == 1 && std::string("(),;{}[]").find(m[0]) != std::string::npos) {
+                    advance(m); return make(TokenKind::Punctuator, m, L, C);
+                }
+                advance(m); return make(TokenKind::Operator, m, L, C);
+            }
+
+            // 8) невідомий символ → помилка (1 символ)
+            std::string one(1, sv[0]);
+            advance(one);
+            return make(TokenKind::Error, one, L, C, "Unknown token");
+        }
+
+        return Token{ TokenKind::EndOfFile, "", {line_, col_}, {} };
     }
 
     std::vector<Token> Lexer::tokenize() {
         std::vector<Token> out;
         while (true) {
-            auto t = next();
-            if (t.kind == TokenKind::Comment && !opts_.keepComments) continue;
+            Token t = next();
             out.push_back(std::move(t));
             if (out.back().kind == TokenKind::EndOfFile || out.back().kind == TokenKind::Error) break;
         }
         return out;
     }
-}
+
+} 
