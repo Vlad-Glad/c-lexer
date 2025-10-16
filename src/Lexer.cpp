@@ -49,9 +49,7 @@ namespace clex {
 
     } 
 
-    Lexer::Lexer(string sourceText)
-        : sourceText_(move(sourceText)) {
-    }
+    Lexer::Lexer(string sourceText): sourceText_(move(sourceText)) {}
 
     bool Lexer::IsEndOfInput() const { 
         return index_ >= sourceText_.size(); 
