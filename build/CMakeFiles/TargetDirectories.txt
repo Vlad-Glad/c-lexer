@@ -1,0 +1,4 @@
+C:/Users/drago/source/repos/C++/Системне програмування/c-lexer/build/CMakeFiles/clex.dir
+C:/Users/drago/source/repos/C++/Системне програмування/c-lexer/build/CMakeFiles/clexer.dir
+C:/Users/drago/source/repos/C++/Системне програмування/c-lexer/build/CMakeFiles/ALL_BUILD.dir
+C:/Users/drago/source/repos/C++/Системне програмування/c-lexer/build/CMakeFiles/ZERO_CHECK.dir

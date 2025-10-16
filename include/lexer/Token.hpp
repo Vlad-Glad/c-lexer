@@ -36,4 +36,4 @@ namespace clex {
 
 	std::string to_string(TokenKind kind);
 
-}
+}	
