@@ -3,38 +3,41 @@
 #include <sstream>
 #include "lexer/Lexer.hpp"
 #include "lexer/Token.hpp"
+using namespace std;
 
-using namespace clex;
-
-static void printUsage(const char* argv0) {
-    std::cerr << "Usage: " << argv0 << " <file.c>\n";
+static void PrintUsage(const char* argv0) {
+    cerr << "Usage: " << argv0 << " <file.c>\n";
 }
 
-static void printToken(const Token& t) {
-    std::cout << "<" << t.lexeme << ", " << to_string(t.kind)
+static void PrintToken(const clex::Token& t) {
+    cout << "<" << t.lexeme << ", " << clex::to_string(t.kind)
         << ", " << t.pos.line << ":" << t.pos.column << ">";
 
-    if (!t.message.empty()) std::cout << " // " << t.message;
-    std::cout << "\n";
+    if (!t.message.empty()) cout << " // " << t.message;
+
+    cout << "\n";
 }
 
 int main(int argc, char** argv) {
-    if (argc < 2) { printUsage(argv[0]); return 1; }
+    if (argc < 2) { 
+        PrintUsage(argv[0]); return 1; 
+    }
 
-    std::ifstream in(argv[1], std::ios::binary);
+    ifstream in(argv[1], ios::binary);
     if (!in) { 
-        std::cerr << "Cannot open: " << argv[1] << "\n"; return 1; 
+        cerr << "Cannot open: " << argv[1] << "\n"; return 1; 
     }
 
-    std::ostringstream buf; buf << in.rdbuf();
-    Lexer lex(buf.str());
+    ostringstream buf; 
+    buf << in.rdbuf();
 
-    auto toks = lex.tokenize();
-    bool hasErr = false;
+    clex::Lexer lexer(buf.str());
+    vector<clex::Token> tokens = lexer.TokenizeAll();
 
-    for (const auto& t : toks) { 
-        printToken(t); 
-        if (t.kind == TokenKind::Error) hasErr = true; 
+    bool hasError = false;
+    for (const clex::Token& t : tokens) {
+        PrintToken(t);
+        if (t.kind == clex::TokenKind::Error) hasError = true;
     }
-    return hasErr ? 2 : 0;
+    return hasError ? 2 : 0;
 }

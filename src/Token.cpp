@@ -1,7 +1,8 @@
 #include "lexer/Token.hpp"
+using namespace std;
 
 namespace clex {
-    std::string to_string(TokenKind k) {
+    string to_string(TokenKind k) {
         switch (k) {
         case TokenKind::Identifier:   return "Identifier";
         case TokenKind::Keyword:      return "Keyword";
@@ -21,4 +22,4 @@ namespace clex {
         }
         return "Unknown";
     }
-}
+} 
