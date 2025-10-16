@@ -15,6 +15,12 @@
     <None Include="C:\Users\drago\source\repos\C++\Системне програмування\c-lexer\example1.c">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="C:\Users\drago\source\repos\C++\Системне програмування\c-lexer\example2.c">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="C:\Users\drago\source\repos\C++\Системне програмування\c-lexer\example3.c">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">
