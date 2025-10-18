@@ -6,5 +6,7 @@ int main(void) {
     if (x > y && z >= 1.0) {
         x = (x > (int)z) ? x : (int)z;
     }
+    x++;
+    ++x;
     return x;
 }
